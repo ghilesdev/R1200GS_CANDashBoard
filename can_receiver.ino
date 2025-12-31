@@ -38,9 +38,15 @@ void OnDataRecv(const esp_now_recv_info_t *esp_now_info, const uint8_t *incoming
   }
 }
 // for drawing
+uint8_t segmentHeight = 10;
+uint16_t rpmBarLength = 400;
+uint16_t rpmBarFillColor = 0xffff;
+uint8_t rpmSegmentLength = 5;
+uint8_t rpmBarHeight = 30;
 uint8_t totalFuelBarHeight = 200; //optimise : do not render if value has not changed
 uint8_t totalFuelBarWidth = 30; //optimise : do not render if value has not changed
 uint8_t lastFuelSegmentsNb = 0; //optimise : do not render if value has not changed
+uint8_t lastRpmSegmentsNb = 0; //optimise : do not render if value has not changed
 uint8_t lastGear = 0; //optimise : do not render if value has not changed
 uint8_t lastOilTemp = 0; //optimise : do not render if value has not changed
 uint8_t lastSpeed = 0; //optimise : do not render if value has not changed
@@ -65,6 +71,17 @@ const unsigned char oilTempIcon [] PROGMEM = {
 	0x00, 0x3d, 0x78, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x7f, 0xfc, 0x00, 
 	0x00, 0x7f, 0xfc, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x7f, 0xfc, 0x00, 
 	0x00, 0x7f, 0xfc, 0x00, 0x00, 0x3f, 0xf8, 0x00, 0x00, 0x1f, 0xf0, 0x00, 0x00, 0x07, 0xc0, 0x00
+};
+
+const unsigned char rpmIcon [] PROGMEM = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x01, 0x98, 0x00, 
+	0x00, 0x7d, 0xf8, 0x00, 0x01, 0xfd, 0xff, 0x00, 0x03, 0xff, 0xff, 0x00, 0x03, 0xff, 0xff, 0xc0, 
+	0x0f, 0xe0, 0xff, 0xf0, 0x1f, 0x80, 0xff, 0xf0, 0x3e, 0x01, 0xff, 0xf8, 0x7c, 0x01, 0xe3, 0xfc, 
+	0x78, 0x03, 0xe3, 0xfc, 0x70, 0x03, 0xe1, 0xfe, 0xe0, 0x07, 0xe0, 0xfe, 0x60, 0x07, 0xc0, 0xf7, 
+	0xc0, 0x0f, 0xc0, 0x7f, 0xc0, 0x0f, 0xc0, 0x7f, 0xc0, 0x1f, 0xc0, 0x7f, 0xc0, 0x1d, 0x80, 0x7f, 
+	0xc0, 0x1f, 0x80, 0x7f, 0xc0, 0x1f, 0x80, 0x7f, 0xc0, 0x07, 0x00, 0x7f, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 // Array of all bitmaps for convenience. (Total bytes used to store images in PROGMEM = 144)
 const int epd_bitmap_allArray_LEN = 1;
@@ -101,16 +118,18 @@ void setup() {
   esp_now_register_recv_cb(OnDataRecv);
 
   // Print initial labels
-  tft.setCursor(10, 40);
+  tft.setCursor(10, 50);
   tft.println("RPM: --");
 
 
 
   // draw gauges
-  drawXBM(446, 78, gasIcon, 32, 32, 0xf00f);
   tft.drawRect(446, 110, totalFuelBarWidth, totalFuelBarHeight+1, 0xffff); //fuel
+  tft.drawRect(44, 10, rpmBarLength+1, rpmBarHeight, 0xffff); //rpm
   tft.drawRect(395, 264, 50, 50, 0x0fff); // gear indcator
-  drawXBM(10, 278, oilTempIcon, 32, 32, 0xf00f);
+  drawXBM(446, 78, gasIcon, 32, 32, 0xf00f); //gas icon
+  drawXBM(10, 278, oilTempIcon, 32, 32, 0xf00f); // oil temp icon
+  drawXBM(10, 10, rpmIcon, 32, 32, 0xf00f); // rpm icon
 
 
 
@@ -139,10 +158,12 @@ void loop() {
   }
 
   // Update display
-  tft.fillRect(50, 40, 200, 20, 0x0000); // Clear RPM value area
-  tft.setCursor(50, 40);
+  tft.fillRect(50, 50, 200, 20, 0x0000); // Clear RPM value area
+  tft.setCursor(50, 50);
   tft.print(receivedData.rpm);
   
+
+  // oil data
   if (receivedData.oilTemp != lastOilTemp){
     tft.fillRect(45, 278, 100, 32, 0x0000); // Clear oil temp area
     tft.setCursor(45, 278);
@@ -152,6 +173,8 @@ void loop() {
     tft.setTextSize(2); //always reset to default text size
     lastOilTemp = receivedData.oilTemp;
   }
+
+  // speed data
   if (receivedData.speed != lastSpeed){
     snprintf(speed, sizeof(speed), "%03d", receivedData.speed);
     tft.fillRect(100, 100, 150, 60, 0x0000); // Clear oil temp area
@@ -161,20 +184,39 @@ void loop() {
     tft.setTextSize(3); //always reset to default text size
     tft.print(" KM/h");
     tft.setTextSize(2); //always reset to default text size
-    lastOilTemp = receivedData.oilTemp;
+    lastSpeed = receivedData.speed;
   }
 
 
 
   // fuel level:
   uint8_t segmentsNb = (uint8_t) map(receivedData.fuelLevel, 0, 100, 0, 20);
+
   if (lastFuelSegmentsNb != segmentsNb){
     if (segmentsNb > lastFuelSegmentsNb){ // draw only added segments
-      tft.fillRect(447, 310-(10*segmentsNb), totalFuelBarWidth-2, (segmentsNb-lastFuelSegmentsNb)*10, 0xffff);
+      tft.fillRect(447, 310-(segmentHeight*segmentsNb), totalFuelBarWidth-2, (segmentsNb-lastFuelSegmentsNb)*segmentHeight, 0xffff);
     } else if (segmentsNb < lastFuelSegmentsNb) { // less fuel, erase corresponding segemnts
-      tft.fillRect(447, 310-(10*lastFuelSegmentsNb), totalFuelBarWidth-2, (lastFuelSegmentsNb-segmentsNb)*10, 0x0000);
+      tft.fillRect(447, 310-(segmentHeight*lastFuelSegmentsNb), totalFuelBarWidth-2, (lastFuelSegmentsNb-segmentsNb)*segmentHeight, 0x0000);
     }
     lastFuelSegmentsNb = segmentsNb;
+  }
+
+  // rpm gauge:
+  uint8_t rpmSegmentsNb = (uint8_t) map(receivedData.rpm, 0, 8000, 0, 80);
+
+  if (lastRpmSegmentsNb != rpmSegmentsNb){
+    if (rpmSegmentsNb > 60) {
+      rpmBarFillColor = 0xf00f;
+    } else {
+      rpmBarFillColor = 0xffff;
+    }
+    if (rpmSegmentsNb > lastRpmSegmentsNb){ // draw only added segments
+      tft.fillRect(45, 11, rpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, rpmBarFillColor);
+    } else if (rpmSegmentsNb < lastRpmSegmentsNb) { // decreasing rpm, erase corresponding segemnts
+      tft.fillRect(45 + rpmSegmentsNb*rpmSegmentLength, 11, lastRpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, 0x0000);
+      tft.fillRect(45, 11, rpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, rpmBarFillColor);
+    }
+    lastRpmSegmentsNb = rpmSegmentsNb;
   }
 
   // Gear indicator
