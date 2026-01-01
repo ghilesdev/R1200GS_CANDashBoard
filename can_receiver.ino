@@ -19,6 +19,9 @@ typedef struct __attribute__((packed)){
   uint8_t oilTemp;
   uint8_t speed;
   uint8_t gear;
+  uint8_t  infoButton; // 4=Off, 5=Short Press, 6=Long Press(>2secs)  
+  uint16_t  blinkers; // CF=Off, D7=Left On, E7=Right On, EF=Both On
+  int odometer; // (d3,d2,d1)
 } canData_t;
 canData_t receivedData;
 
@@ -29,7 +32,6 @@ bool simulateData = false;
 void OnDataRecv(const esp_now_recv_info_t *esp_now_info, const uint8_t *incomingData, int len) {
   if (len == sizeof(canData_t)) {
     memcpy(&receivedData, incomingData, len);
-    Serial.println(receivedData.speed);
   } else {
     Serial.println("impossible to copy received data");
     Serial.println(len);
@@ -50,6 +52,7 @@ uint8_t lastRpmSegmentsNb = 0; //optimise : do not render if value has not chang
 uint8_t lastGear = 0; //optimise : do not render if value has not changed
 uint8_t lastOilTemp = 0; //optimise : do not render if value has not changed
 uint8_t lastSpeed = 0; //optimise : do not render if value has not changed
+uint8_t lastBlinkerStatus = 0; 
 char speed[4];
 // 'station-essence', 32x32px
 const unsigned char gasIcon [] PROGMEM = {
@@ -83,17 +86,49 @@ const unsigned char rpmIcon [] PROGMEM = {
 	0xc0, 0x1f, 0x80, 0x7f, 0xc0, 0x1f, 0x80, 0x7f, 0xc0, 0x07, 0x00, 0x7f, 0x00, 0x00, 0x00, 0x00, 
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
+
+const unsigned char leftArrowIcon [] PROGMEM = {
+	0x00, 0x3f, 0xfc, 0x00, 0x00, 0xff, 0xff, 0x00, 0x03, 0xff, 0xff, 0xc0, 0x07, 0xff, 0xff, 0xe0, 
+	0x0f, 0xff, 0xff, 0xf0, 0x1f, 0xff, 0xff, 0xf8, 0x3f, 0xff, 0xff, 0xfc, 0x3f, 0xff, 0xff, 0xfc, 
+	0x7f, 0xff, 0xff, 0xfe, 0x7f, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfc, 0xff, 0xff, 
+	0xff, 0xf8, 0xff, 0xff, 0xff, 0xe0, 0xff, 0xff, 0xff, 0x80, 0x00, 0x7f, 0xff, 0x00, 0x00, 0x7f, 
+	0xff, 0x00, 0x00, 0x7f, 0xff, 0x80, 0x00, 0x7f, 0xff, 0xe0, 0xff, 0xff, 0xff, 0xf8, 0xff, 0xff, 
+	0xff, 0xfc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xff, 0xfe, 0x7f, 0xff, 0xff, 0xfe, 
+	0x3f, 0xff, 0xff, 0xfc, 0x3f, 0xff, 0xff, 0xfc, 0x1f, 0xff, 0xff, 0xf8, 0x0f, 0xff, 0xff, 0xf0, 
+	0x07, 0xff, 0xff, 0xe0, 0x03, 0xff, 0xff, 0xc0, 0x00, 0xff, 0xff, 0x00, 0x00, 0x3f, 0xfc, 0x00
+};
+
+const unsigned char rightArrowIcon [] PROGMEM = {
+	0x00, 0x1f, 0xf8, 0x00, 0x00, 0x7f, 0xfe, 0x00, 0x01, 0xff, 0xff, 0x80, 0x03, 0xff, 0xff, 0xc0, 
+	0x07, 0xff, 0xff, 0xe0, 0x0f, 0xff, 0xff, 0xf0, 0x1f, 0xff, 0xff, 0xf8, 0x3f, 0xff, 0xff, 0xfc, 
+	0x3f, 0xff, 0xff, 0xfc, 0x7f, 0xff, 0xff, 0xfe, 0x7f, 0xff, 0x7f, 0xfe, 0xff, 0xff, 0x1f, 0xff, 
+	0xff, 0xff, 0x0f, 0xff, 0xff, 0xff, 0x03, 0xff, 0xfe, 0x00, 0x01, 0xff, 0xfc, 0x00, 0x00, 0x7f, 
+	0xfc, 0x00, 0x00, 0x7f, 0xfe, 0x00, 0x01, 0xff, 0xff, 0xff, 0x03, 0xff, 0xff, 0xff, 0x0f, 0xff, 
+	0xff, 0xff, 0x1f, 0xff, 0x7f, 0xff, 0x7f, 0xfe, 0x7f, 0xff, 0xff, 0xfe, 0x3f, 0xff, 0xff, 0xfc, 
+	0x3f, 0xff, 0xff, 0xfc, 0x1f, 0xff, 0xff, 0xf8, 0x0f, 0xff, 0xff, 0xf0, 0x07, 0xff, 0xff, 0xe0, 
+	0x03, 0xff, 0xff, 0xc0, 0x01, 0xff, 0xff, 0x80, 0x00, 0x7f, 0xfe, 0x00, 0x00, 0x1f, 0xf8, 0x00
+};
 // Array of all bitmaps for convenience. (Total bytes used to store images in PROGMEM = 144)
 const int epd_bitmap_allArray_LEN = 1;
 const unsigned char* epd_bitmap_allArray[1] = {
 	gasIcon
 };
 
-void drawXBM(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w, int16_t h, uint16_t color) {
+void drawXBM(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w, int16_t h, uint16_t color, bool hflip) {
   for (int16_t j = 0; j < h; j++) {
     for (int16_t i = 0; i < w; i++) {
-      if (pgm_read_byte(&bitmap[j * (w / 8) + i / 8]) & (1 << (7 - (i % 8)))) {
-        tft.drawPixel(x + i, y + j, color);
+      uint8_t byteIndex;
+      uint8_t bitIndex = i % 8;;
+      int16_t xOffset;
+      if (hflip) {
+        byteIndex = j * (w / 8) + (w / 8 - 1 - (i / 8));
+        xOffset = (w - 1 - i);
+      } else {
+        byteIndex = j * (w / 8) + i / 8;
+        xOffset = i;
+      }
+      if (pgm_read_byte(&bitmap[byteIndex]) & (1 << (7 - (bitIndex)))) {
+        tft.drawPixel(x + xOffset, y + j, color);
       }
     }
   }
@@ -127,9 +162,9 @@ void setup() {
   tft.drawRect(446, 110, totalFuelBarWidth, totalFuelBarHeight+1, 0xffff); //fuel
   tft.drawRect(44, 10, rpmBarLength+1, rpmBarHeight, 0xffff); //rpm
   tft.drawRect(395, 264, 50, 50, 0x0fff); // gear indcator
-  drawXBM(446, 78, gasIcon, 32, 32, 0xf00f); //gas icon
-  drawXBM(10, 278, oilTempIcon, 32, 32, 0xf00f); // oil temp icon
-  drawXBM(10, 10, rpmIcon, 32, 32, 0xf00f); // rpm icon
+  drawXBM(446, 78, gasIcon, 32, 32, 0xf00f, false); //gas icon
+  drawXBM(10, 278, oilTempIcon, 32, 32, 0xf00f, false); // oil temp icon
+  drawXBM(10, 10, rpmIcon, 32, 32, 0xf00f, false); // rpm icon
 
 
 
@@ -162,6 +197,38 @@ void loop() {
   tft.setCursor(50, 50);
   tft.print(receivedData.rpm);
   
+  tft.fillRect(10, 80, 200, 20, 0x0000); // Clear blinkers value area
+  tft.setCursor(10, 80);
+  tft.print(receivedData.blinkers);
+  
+  // tft.fillRect(10, 110, 200, 20, 0x0000); // Clear odometer value area
+  // tft.setCursor(10, 110);
+  // tft.print(receivedData.odometer);
+  
+  // tft.fillRect(10, 140, 200, 20, 0x0000); // Clear info value area
+  // tft.setCursor(10, 140);
+  // tft.print(receivedData.infoButton);
+  uint8_t blinkerStatus = receivedData.blinkers;
+  if (blinkerStatus != lastBlinkerStatus){
+    if (blinkerStatus == 0) {
+      tft.fillRect(10, 230, 32, 32, 0x0000);
+      tft.fillRect(400, 230, 32, 32, 0x0000);
+    } else if (blinkerStatus == 1) {
+      drawXBM(10, 230, leftArrowIcon, 32, 32, 0x0f0f, false); 
+      tft.fillRect(400, 230, 32, 32, 0x0000);
+    } else if (blinkerStatus == 2) {
+      tft.fillRect(10, 230, 32, 32, 0x0000);
+      drawXBM(400, 230, rightArrowIcon, 32, 32, 0x0f0f, false); 
+    } else if (blinkerStatus == 3) {
+      drawXBM(10, 230, leftArrowIcon, 32, 32, 0x0f0f, false); 
+      drawXBM(400, 230, rightArrowIcon, 32, 32, 0x0f0f, false); 
+
+    } else {
+      Serial.println("received unexpected data for blinkers:");
+      Serial.println(blinkerStatus);
+    }
+    lastBlinkerStatus = receivedData.blinkers;
+  }
 
   // oil data
   if (receivedData.oilTemp != lastOilTemp){
@@ -220,19 +287,20 @@ void loop() {
   }
 
   // Gear indicator
-  if (receivedData.gear != lastGear) {
+  uint8_t gearLabel = receivedData.gear;
+  if (gearLabel != lastGear) {
     tft.fillRect(396, 265, 48, 48, 0x0000); // Clear gear indicator area
     tft.setCursor(406, 275);
     tft.setTextSize(5);
-    if (receivedData.gear == 0){
+    if (gearLabel == 0){
       tft.setTextColor(0x0f0f);
       tft.print("N");
-    } else {
       tft.setTextColor(0xffff);
-      tft.print(receivedData.gear);
+    } else {
+      tft.print(gearLabel);
     }
     tft.setTextSize(2);
-    receivedData.gear = lastGear;
+    lastGear = gearLabel;
   }
 
 
