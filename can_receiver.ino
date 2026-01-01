@@ -12,6 +12,10 @@
 #define TFT_SCLK 6
 ILI9486_SPI tft(TFT_CS, TFT_DC, TFT_RST);
 
+// TODO
+// add oil warning, lamp fault, hight beam, air temp
+
+
 // Data structure for ESP-NOW
 typedef struct __attribute__((packed)){
   uint16_t rpm;
@@ -24,9 +28,6 @@ typedef struct __attribute__((packed)){
   int odometer; // (d3,d2,d1)
 } canData_t;
 canData_t receivedData;
-
-// Simulation flag
-bool simulateData = false;
 
 // ESP-NOW callback
 void OnDataRecv(const esp_now_recv_info_t *esp_now_info, const uint8_t *incomingData, int len) {
@@ -41,6 +42,8 @@ void OnDataRecv(const esp_now_recv_info_t *esp_now_info, const uint8_t *incoming
 }
 // for drawing
 uint8_t segmentHeight = 10;
+uint8_t rpmBarStartY = 15;
+uint8_t rpmBarStartX = 44;
 uint16_t rpmBarLength = 400;
 uint16_t rpmBarFillColor = 0xffff;
 uint8_t rpmSegmentLength = 5;
@@ -53,7 +56,10 @@ uint8_t lastGear = 0; //optimise : do not render if value has not changed
 uint8_t lastOilTemp = 0; //optimise : do not render if value has not changed
 uint8_t lastSpeed = 0; //optimise : do not render if value has not changed
 uint8_t lastBlinkerStatus = 0; 
-char speed[4];
+uint8_t lastInfoButtonStatus = 0; 
+int lastOdometer = 0;
+char speed[4]; //buffer to keep speed number on 3 digits
+
 // 'station-essence', 32x32px
 const unsigned char gasIcon [] PROGMEM = {
 	0x00, 0x00, 0x00, 0x00, 0x1f, 0xff, 0xe0, 0x00, 0x3f, 0xff, 0xf1, 0x80, 0x38, 0x00, 0x3b, 0x80, 
@@ -152,15 +158,18 @@ void setup() {
   Serial.println(WiFi.macAddress());
   esp_now_register_recv_cb(OnDataRecv);
 
-  // Print initial labels
-  tft.setCursor(10, 50);
-  tft.println("RPM: --");
-
-
-
   // draw gauges
   tft.drawRect(446, 110, totalFuelBarWidth, totalFuelBarHeight+1, 0xffff); //fuel
-  tft.drawRect(44, 10, rpmBarLength+1, rpmBarHeight, 0xffff); //rpm
+  
+  // rpm ticks
+  for (uint8_t i=0; i <=8; i++) {
+    tft.setCursor(rpmBarStartX + (i*50), 0);
+    tft.setTextColor(0x0fff);
+    tft.println(i);
+  }
+  tft.setTextColor(0xffff);
+
+  tft.drawRect(rpmBarStartX, rpmBarStartY, rpmBarLength+1, rpmBarHeight, 0xffff); //rpm
   tft.drawRect(395, 264, 50, 50, 0x0fff); // gear indcator
   drawXBM(446, 78, gasIcon, 32, 32, 0xf00f, false); //gas icon
   drawXBM(10, 278, oilTempIcon, 32, 32, 0xf00f, false); // oil temp icon
@@ -171,43 +180,15 @@ void setup() {
 }
 
 void loop() {
-  // Handle serial commands
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    if (cmd == "test on") {
-      simulateData = true;
-      Serial.println("Simulation mode ON");
-    } else if (cmd == "test off") {
-      simulateData = false;
-      Serial.println("Simulation mode OFF");
-    }
+
+  if (receivedData.infoButton != lastInfoButtonStatus) {
+    tft.fillRect(10, 50, 200, 20, 0x0000); // Clear info value area
+    tft.setCursor(10, 50);
+    tft.print("Info button: ");
+    tft.print(receivedData.infoButton);
+    lastInfoButtonStatus = receivedData.infoButton;
   }
 
-  // Simulate or use real data
-  if (simulateData) {
-    receivedData.rpm = random(0, 10000);
-    receivedData.oilTemp = random(60, 120);
-    receivedData.fuelLevel = random(0, 100);
-    // receivedData.gear = random(0, 6);
-  }
-
-  // Update display
-  tft.fillRect(50, 50, 200, 20, 0x0000); // Clear RPM value area
-  tft.setCursor(50, 50);
-  tft.print(receivedData.rpm);
-  
-  tft.fillRect(10, 80, 200, 20, 0x0000); // Clear blinkers value area
-  tft.setCursor(10, 80);
-  tft.print(receivedData.blinkers);
-  
-  // tft.fillRect(10, 110, 200, 20, 0x0000); // Clear odometer value area
-  // tft.setCursor(10, 110);
-  // tft.print(receivedData.odometer);
-  
-  // tft.fillRect(10, 140, 200, 20, 0x0000); // Clear info value area
-  // tft.setCursor(10, 140);
-  // tft.print(receivedData.infoButton);
   uint8_t blinkerStatus = receivedData.blinkers;
   if (blinkerStatus != lastBlinkerStatus){
     if (blinkerStatus == 0) {
@@ -254,6 +235,18 @@ void loop() {
     lastSpeed = receivedData.speed;
   }
 
+  // odometer
+  if (receivedData.odometer != lastOdometer) {
+    tft.fillRect(100, 180, 150, 30, 0x0000); 
+    tft.setCursor(100, 180);
+    tft.setTextSize(3); 
+    tft.print("ODO: ");
+    tft.print(receivedData.odometer);
+    tft.print(" KM");
+    tft.setTextSize(2); //always reset to default text size
+    lastOdometer = receivedData.odometer;
+  }
+
 
 
   // fuel level:
@@ -278,10 +271,10 @@ void loop() {
       rpmBarFillColor = 0xffff;
     }
     if (rpmSegmentsNb > lastRpmSegmentsNb){ // draw only added segments
-      tft.fillRect(45, 11, rpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, rpmBarFillColor);
+      tft.fillRect(rpmBarStartX + 1 , rpmBarStartY + 1, rpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, rpmBarFillColor);
     } else if (rpmSegmentsNb < lastRpmSegmentsNb) { // decreasing rpm, erase corresponding segemnts
-      tft.fillRect(45 + rpmSegmentsNb*rpmSegmentLength, 11, lastRpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, 0x0000);
-      tft.fillRect(45, 11, rpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, rpmBarFillColor);
+      tft.fillRect(rpmBarStartX + 1  + rpmSegmentsNb*rpmSegmentLength, rpmBarStartY + 1, lastRpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, 0x0000);
+      tft.fillRect(rpmBarStartX + 1 , rpmBarStartY + 1, rpmSegmentsNb*rpmSegmentLength, rpmBarHeight-2, rpmBarFillColor);
     }
     lastRpmSegmentsNb = rpmSegmentsNb;
   }
