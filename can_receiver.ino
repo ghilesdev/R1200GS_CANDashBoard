@@ -40,6 +40,7 @@ void OnDataRecv(const esp_now_recv_info_t *esp_now_info, const uint8_t *incoming
 
   }
 }
+
 // for drawing
 uint8_t segmentHeight = 10;
 uint8_t rpmBarStartY = 15;
@@ -48,13 +49,13 @@ uint16_t rpmBarLength = 400;
 uint16_t rpmBarFillColor = 0xffff;
 uint8_t rpmSegmentLength = 5;
 uint8_t rpmBarHeight = 30;
-uint8_t totalFuelBarHeight = 200; //optimise : do not render if value has not changed
-uint8_t totalFuelBarWidth = 30; //optimise : do not render if value has not changed
-uint8_t lastFuelSegmentsNb = 0; //optimise : do not render if value has not changed
-uint8_t lastRpmSegmentsNb = 0; //optimise : do not render if value has not changed
-uint8_t lastGear = 0; //optimise : do not render if value has not changed
-uint8_t lastOilTemp = 0; //optimise : do not render if value has not changed
-uint8_t lastSpeed = 0; //optimise : do not render if value has not changed
+uint8_t totalFuelBarHeight = 200; 
+uint8_t totalFuelBarWidth = 30; 
+uint8_t lastFuelSegmentsNb = 0; 
+uint8_t lastRpmSegmentsNb = 0; 
+uint8_t lastGear = 0; 
+uint8_t lastOilTemp = 0; 
+uint8_t lastSpeed = 0; 
 uint8_t lastBlinkerStatus = 0; 
 uint8_t lastInfoButtonStatus = 0; 
 int lastOdometer = 0;
@@ -114,11 +115,6 @@ const unsigned char rightArrowIcon [] PROGMEM = {
 	0x3f, 0xff, 0xff, 0xfc, 0x1f, 0xff, 0xff, 0xf8, 0x0f, 0xff, 0xff, 0xf0, 0x07, 0xff, 0xff, 0xe0, 
 	0x03, 0xff, 0xff, 0xc0, 0x01, 0xff, 0xff, 0x80, 0x00, 0x7f, 0xfe, 0x00, 0x00, 0x1f, 0xf8, 0x00
 };
-// Array of all bitmaps for convenience. (Total bytes used to store images in PROGMEM = 144)
-const int epd_bitmap_allArray_LEN = 1;
-const unsigned char* epd_bitmap_allArray[1] = {
-	gasIcon
-};
 
 void drawXBM(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w, int16_t h, uint16_t color, bool hflip) {
   for (int16_t j = 0; j < h; j++) {
@@ -175,8 +171,33 @@ void setup() {
   drawXBM(10, 278, oilTempIcon, 32, 32, 0xf00f, false); // oil temp icon
   drawXBM(10, 10, rpmIcon, 32, 32, 0xf00f, false); // rpm icon
 
+  // initialize fields
+    tft.fillRect(45, 278, 100, 32, 0x0000); // Clear oil temp area
+    tft.setCursor(45, 278);
+    tft.setTextSize(4);
+    tft.print("-- C");
+    tft.setTextSize(2);
 
 
+    tft.fillRect(100, 100, 150, 60, 0x0000); // Clear speed area
+    tft.setCursor(100, 100);
+    tft.setTextSize(8);
+    tft.print("---");
+    tft.setTextSize(3);
+    tft.print(" KM/h");
+    tft.setTextSize(2); //always reset to default text size
+
+    tft.fillRect(100, 180, 150, 30, 0x0000); 
+    tft.setCursor(100, 180);
+    tft.setTextSize(3); 
+    tft.print("ODO: ------ KM");
+    tft.setTextSize(2); //always reset to default text size
+
+    tft.fillRect(396, 265, 48, 48, 0x0000); // Clear gear indicator area
+    tft.setCursor(406, 275);
+    tft.setTextSize(5);
+    tft.print("-");
+    tft.setTextSize(2);
 }
 
 void loop() {
@@ -225,7 +246,7 @@ void loop() {
   // speed data
   if (receivedData.speed != lastSpeed){
     snprintf(speed, sizeof(speed), "%03d", receivedData.speed);
-    tft.fillRect(100, 100, 150, 60, 0x0000); // Clear oil temp area
+    tft.fillRect(100, 100, 150, 60, 0x0000); // Clear speed area
     tft.setCursor(100, 100);
     tft.setTextSize(8);
     tft.print(speed);
